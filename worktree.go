@@ -328,16 +328,20 @@ func (w *Worktree) checkoutChangeRegularFile(name string,
 }
 
 func (w *Worktree) checkoutFile(f *object.File) error {
+	mode, err := f.Mode.ToOSFileMode()
+	if err != nil {
+		return err
+	}
+
+	if mode&os.ModeSymlink != 0 {
+		return w.checkoutFileSymlink(f)
+	}
+
 	from, err := f.Reader()
 	if err != nil {
 		return err
 	}
 	defer from.Close()
-
-	mode, err := f.Mode.ToOSFileMode()
-	if err != nil {
-		return err
-	}
 
 	to, err := w.fs.OpenFile(f.Name, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode.Perm())
 	if err != nil {
@@ -352,6 +356,21 @@ func (w *Worktree) checkoutFile(f *object.File) error {
 	return err
 }
 
+func (w *Worktree) checkoutFileSymlink(f *object.File) error {
+	from, err := f.Reader()
+	if err != nil {
+		return err
+	}
+	defer from.Close()
+
+	bytes, err := ioutil.ReadAll(from)
+	if err != nil {
+		return err
+	}
+
+	return w.fs.Symlink(string(bytes), f.Name)
+}
+
 func (w *Worktree) addIndexFromTreeEntry(name string, f *object.TreeEntry, idx *index.Index) error {
 	idx.Entries = append(idx.Entries, &index.Entry{
 		Hash: f.Hash,
@@ -363,7 +382,7 @@ func (w *Worktree) addIndexFromTreeEntry(name string, f *object.TreeEntry, idx *
 }
 
 func (w *Worktree) addIndexFromFile(name string, h plumbing.Hash, idx *index.Index) error {
-	fi, err := w.fs.Stat(name)
+	fi, err := w.fs.Lstat(name)
 	if err != nil {
 		return err
 	}
